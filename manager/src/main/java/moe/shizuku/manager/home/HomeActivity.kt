@@ -11,7 +11,11 @@ import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.shizuku.manager.R
 import moe.shizuku.manager.ShizukuSettings
-import moe.shizuku.manager.app.AppBarActivity
 import moe.shizuku.manager.databinding.AboutDialogBinding
 import moe.shizuku.manager.databinding.HomeActivityBinding
 import moe.shizuku.manager.ktx.toHtml
@@ -35,7 +38,10 @@ import rikka.recyclerview.addItemSpacing
 import rikka.recyclerview.fixEdgeEffect
 import rikka.shizuku.Shizuku
 
-abstract class HomeActivity : AppBarActivity() {
+class HomeFragment : Fragment() {
+
+    private var _binding: HomeActivityBinding? = null
+    private val binding get() = _binding!!
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         checkServerStatus()
@@ -46,26 +52,36 @@ abstract class HomeActivity : AppBarActivity() {
         checkServerStatus()
     }
 
-    private val homeModel by viewModels { HomeViewModel() }
+    private val homeModel by viewModels<HomeViewModel>()
     private val appsModel by appsViewModel()
     private val adapter by unsafeLazy { HomeAdapter(homeModel, appsModel) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        setHasOptionsMenu(true) // 启用 Fragment 的菜单支持
         writeStarterFiles()
+    }
 
-        val binding = HomeActivityBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        _binding = HomeActivityBinding.inflate(inflater, container, false)
+        return binding.root
+    }
 
-        homeModel.serviceStatus.observe(this) {
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        homeModel.serviceStatus.observe(viewLifecycleOwner) {
             if (it.status == Status.SUCCESS) {
                 val status = homeModel.serviceStatus.value?.data ?: return@observe
                 adapter.updateData()
                 ShizukuSettings.setLastLaunchMode(if (status.uid == 0) ShizukuSettings.LaunchMethod.ROOT else ShizukuSettings.LaunchMethod.ADB)
             }
         }
-        appsModel.grantedCount.observe(this) {
+        appsModel.grantedCount.observe(viewLifecycleOwner) {
             if (it.status == Status.SUCCESS) {
                 adapter.updateData()
             }
@@ -90,71 +106,78 @@ abstract class HomeActivity : AppBarActivity() {
         homeModel.reload()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onDestroyView() {
+        super.onDestroyView()
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
+        _binding = null
     }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.main, menu)
-        return true
+    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
+        inflater.inflate(R.menu.main, menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.action_about -> {
-                val binding = AboutDialogBinding.inflate(LayoutInflater.from(this), null, false)
-                binding.sourceCode.movementMethod = LinkMovementMethod.getInstance()
-                binding.sourceCode.text = getString(
-                    R.string.about_view_source_code,
-                    "<b><a href=\"https://github.com/RikkaApps/Shizuku\">GitHub</a></b>"
-                ).toHtml()
-                binding.icon.setImageBitmap(
-                    AppIconCache.getOrLoadBitmap(
-                        this,
-                        applicationInfo,
-                        Process.myUid() / 100000,
-                        resources.getDimensionPixelOffset(R.dimen.default_app_icon_size)
-                    )
-                )
-                binding.versionName.text = packageManager.getPackageInfo(packageName, 0).versionName
-                MaterialAlertDialogBuilder(this)
-                    .setView(binding.root)
-                    .show()
+                showAboutDialog()
                 true
             }
             R.id.action_stop -> {
-                if (!Shizuku.pingBinder()) {
-                    return true
-                }
-                MaterialAlertDialogBuilder(this)
-                    .setMessage(R.string.dialog_stop_message)
-                    .setPositiveButton(android.R.string.ok) { _: DialogInterface?, _: Int ->
-                        try {
-                            Shizuku.exit()
-                        } catch (e: Throwable) {
-                        }
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                handleStopAction()
                 true
             }
             R.id.action_settings -> {
-                startActivity(Intent(this, SettingsActivity::class.java))
+                startActivity(Intent(requireContext(), SettingsActivity::class.java))
                 true
             }
             else -> super.onOptionsItemSelected(item)
         }
     }
 
+    private fun showAboutDialog() {
+        val binding = AboutDialogBinding.inflate(LayoutInflater.from(requireContext()), null, false)
+        binding.sourceCode.movementMethod = LinkMovementMethod.getInstance()
+        binding.sourceCode.text = getString(
+            R.string.about_view_source_code,
+            "<b><a href=\"https://github.com/RikkaApps/Shizuku\">GitHub</a></b>"
+        ).toHtml()
+        binding.icon.setImageBitmap(
+            AppIconCache.getOrLoadBitmap(
+                requireContext(),
+                requireContext().applicationInfo,
+                Process.myUid() / 100000,
+                resources.getDimensionPixelOffset(R.dimen.default_app_icon_size)
+            )
+        )
+        binding.versionName.text = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
+        MaterialAlertDialogBuilder(requireContext())
+            .setView(binding.root)
+            .show()
+    }
+
+    private fun handleStopAction() {
+        if (!Shizuku.pingBinder()) return
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setMessage(R.string.dialog_stop_message)
+            .setPositiveButton(android.R.string.ok) { _: DialogInterface?, _: Int ->
+                try {
+                    Shizuku.exit()
+                } catch (e: Throwable) {
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun writeStarterFiles() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                Starter.writeSdcardFiles(applicationContext)
+                Starter.writeSdcardFiles(requireContext())
             } catch (e: Throwable) {
                 withContext(Dispatchers.Main) {
-                    MaterialAlertDialogBuilder(this@HomeActivity)
+                    MaterialAlertDialogBuilder(requireContext())
                         .setTitle("Cannot write files")
                         .setMessage(Log.getStackTraceString(e))
                         .setPositiveButton(android.R.string.ok, null)
