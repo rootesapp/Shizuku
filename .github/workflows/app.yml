@@ -77,7 +77,7 @@ jobs:
           name: ${{ steps.buildWithGradle.outputs.debugName }}
           path: "manager/build/outputs/apk/debug/*.apk"
       - name: Upload mappings
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: mappings
           path: "manager/build/outputs/mapping/release"
